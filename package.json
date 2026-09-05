@@ -1,0 +1,12 @@
+{
+  "name": "secure-e2e-chat",
+  "version": "1.0.0",
+  "description": "End-to-end encrypted chat app with images, stories, and contacts. Zero external dependencies.",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node server.js"
+  }
+}
