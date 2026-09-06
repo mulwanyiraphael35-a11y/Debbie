@@ -85,7 +85,11 @@
   <div id="stories-bar"></div>
   <div id="sidebar">
     <h3>Contacts</h3>
-    <button id="find-contacts-btn" style="margin:0 16px 10px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:none; color:var(--accent); font-size:13px; cursor:pointer; width:calc(100% - 32px);">📇 Find contacts from phone</button>
+    <button id="find-contacts-btn" style="margin:0 16px 6px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:none; color:var(--accent); font-size:13px; cursor:pointer; width:calc(100% - 32px);">📇 Find contacts from phone</button>
+    <div style="display:flex; gap:6px; margin:0 16px 10px;">
+      <input id="manual-phone-input" type="tel" placeholder="Or type a phone number" style="flex:1; min-width:0; padding:8px 10px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:13px;" />
+      <button id="manual-phone-btn" style="padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:none; color:var(--accent); font-size:13px; cursor:pointer; white-space:nowrap;">Find</button>
+    </div>
     <div id="contact-list"></div>
   </div>
   <div id="chat">
@@ -286,6 +290,37 @@ function formatLastSeen(ts) {
 // There is no way to silently read the full address book from a web page —
 // this only returns the specific contacts the person explicitly picks.
 document.getElementById('find-contacts-btn').onclick = findContacts;
+document.getElementById('manual-phone-btn').onclick = findByManualPhone;
+document.getElementById('manual-phone-input').addEventListener('keydown', e => { if (e.key === 'Enter') findByManualPhone(); });
+
+// Works everywhere (no Contact Picker / native permission needed) — the
+// person just types in a phone number instead of picking from their
+// device's address book, and we check it against registered users the
+// same way findContacts() does.
+async function findByManualPhone() {
+  const input = document.getElementById('manual-phone-input');
+  const phone = input.value.trim();
+  if (!phone) return;
+
+  const r = await fetch(`${API}/api/contacts/match`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phones: [phone] })
+  });
+  const { matches } = await r.json();
+  const found = matches[phone];
+
+  if (!found) {
+    alert('No one on SecureChat is registered with that number.');
+    return;
+  }
+  if (found === me) {
+    alert("That's your own number.");
+    return;
+  }
+  input.value = '';
+  loadContacts();
+  openConversation(found);
+}
 
 async function findContacts() {
   if (!('contacts' in navigator) || !('ContactsManager' in window)) {
