@@ -24,10 +24,24 @@ const PORT = process.env.PORT || 3000;
 const STORY_TTL_MS = 24 * 60 * 60 * 1000; // stories expire after 24h
 
 // ---- In-memory "database" (swap for real DB in production) ----
-const users = new Map();       // username -> { publicKey, lastSeen, online, pushToken }
+const users = new Map();       // username -> { publicKey, lastSeen, online, pushToken, phone }
+const phoneIndex = new Map();  // normalized phone -> username (for "find my contacts" matching)
 const messages = [];           // { id, from, to, ciphertext, iv, encryptedKey, type, ts, status }
 const stories = [];            // { id, from, ciphertext, iv, mediaType, ts }
 const sseClients = new Map();  // username -> [res, res, ...]
+
+function normalizePhone(raw) {
+  // Keep digits only, so "+1 (555) 123-4567", "555-123-4567", etc. all match.
+  return String(raw || '').replace(/\D/g, '');
+}
+
+// Matching by the last 10 digits handles the common case where one side
+// includes a country code (+1 555-123-4567) and the other doesn't
+// (555-123-4567) — a real phone contact book will have both forms.
+function phoneMatchKey(raw) {
+  const digits = normalizePhone(raw);
+  return digits.length > 10 ? digits.slice(-10) : digits;
+}
 
 function send(res, status, obj) {
   const body = JSON.stringify(obj);
@@ -146,13 +160,29 @@ const server = http.createServer(async (req, res) => {
       return send(res, 400, { error: 'username and publicKey required' });
     }
     const existing = users.get(body.username);
+    const phone = body.phone ? normalizePhone(body.phone) : (existing ? existing.phone : null);
     users.set(body.username, {
       publicKey: body.publicKey,
       lastSeen: existing ? existing.lastSeen : Date.now(),
       online: existing ? existing.online : false,
       pushToken: existing ? existing.pushToken : null,
+      phone,
     });
+    if (phone) phoneIndex.set(phoneMatchKey(phone), body.username);
     return send(res, 200, { success: true });
+  }
+
+  // ---- Match a list of phone numbers (e.g. from the device's contact
+  // book, picked via the Contact Picker API) against registered users ----
+  if (url.pathname === '/api/contacts/match' && req.method === 'POST') {
+    const body = await readBody(req).catch(() => null);
+    if (!body || !Array.isArray(body.phones)) return send(res, 400, { error: 'phones array required' });
+    const matches = {};
+    for (const raw of body.phones) {
+      const key = phoneMatchKey(raw);
+      if (key && phoneIndex.has(key)) matches[raw] = phoneIndex.get(key);
+    }
+    return send(res, 200, { matches });
   }
 
   // ---- Register/refresh this user's FCM device token for push notifications ----
