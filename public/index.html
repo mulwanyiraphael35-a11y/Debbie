@@ -75,6 +75,7 @@
 <div id="login">
   <h2>🔒 SecureChat</h2>
   <input id="username-input" type="text" placeholder="Choose a username" autocomplete="off" />
+  <input id="phone-input" type="tel" placeholder="Phone number (optional — lets contacts find you)" autocomplete="off" />
   <button id="login-btn">Enter</button>
   <p class="hint">An RSA keypair is generated in your browser on login. Your private key never leaves this device — the server only ever stores encrypted ciphertext.</p>
   <p id="login-error"></p>
@@ -84,6 +85,7 @@
   <div id="stories-bar"></div>
   <div id="sidebar">
     <h3>Contacts</h3>
+    <button id="find-contacts-btn" style="margin:0 16px 10px; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:none; color:var(--accent); font-size:13px; cursor:pointer; width:calc(100% - 32px);">📇 Find contacts from phone</button>
     <div id="contact-list"></div>
   </div>
   <div id="chat">
@@ -203,6 +205,7 @@ async function login() {
 
   const name = document.getElementById('username-input').value.trim();
   if (!name) return;
+  const phone = document.getElementById('phone-input').value.trim();
 
   // Web Crypto's subtle API only exists in a "secure context": https://
   // or http://localhost. Opening this file directly (file://) or loading
@@ -224,7 +227,7 @@ async function login() {
 
     const r = await fetch(`${API}/api/register`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: me, publicKey: publicKeyB64 })
+      body: JSON.stringify({ username: me, publicKey: publicKeyB64, phone: phone || undefined })
     });
     if (!r.ok) throw new Error(`Server responded with ${r.status}`);
 
@@ -278,6 +281,54 @@ function formatLastSeen(ts) {
 }
 
 // ---------------- Contacts ----------------
+// ---------------- Find contacts from phone (Contact Picker API) ----------------
+// Supported today only in Chrome/Edge on Android, over HTTPS, behind a user tap.
+// There is no way to silently read the full address book from a web page —
+// this only returns the specific contacts the person explicitly picks.
+document.getElementById('find-contacts-btn').onclick = findContacts;
+
+async function findContacts() {
+  if (!('contacts' in navigator) || !('ContactsManager' in window)) {
+    alert(
+      'Contact import isn\'t supported in this browser. It currently only works in ' +
+      'Chrome or Edge on Android over HTTPS — not in Safari, desktop browsers, or ' +
+      'every app-wrapper WebView.'
+    );
+    return;
+  }
+  try {
+    const props = ['name', 'tel'];
+    const opts = { multiple: true };
+    const picked = await navigator.contacts.select(props, opts);
+    if (!picked.length) return;
+
+    const phones = [];
+    for (const c of picked) {
+      for (const t of (c.tel || [])) phones.push(t);
+    }
+    if (!phones.length) {
+      alert('None of the selected contacts had a phone number.');
+      return;
+    }
+
+    const r = await fetch(`${API}/api/contacts/match`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phones })
+    });
+    const { matches } = await r.json();
+    const foundUsernames = [...new Set(Object.values(matches))].filter(u => u !== me);
+
+    if (!foundUsernames.length) {
+      alert('None of the selected contacts are on SecureChat yet.');
+      return;
+    }
+    alert(`On SecureChat: ${foundUsernames.join(', ')}`);
+    loadContacts(); // they're already registered users, so they'll now show in the sidebar
+  } catch (err) {
+    if (err.name !== 'AbortError') console.error('Contact picker failed:', err);
+  }
+}
+
 async function loadContacts() {
   const r = await fetch(`${API}/api/users`);
   const { users } = await r.json();
